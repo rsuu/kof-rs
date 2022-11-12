@@ -1,8 +1,40 @@
+use asefile::AsepriteFile;
 use image;
 use image::io::Reader as ImageReader;
 use std::io::Cursor;
+use std::path::Path;
 
 use minifb::{Key, Window};
+
+const FPS: u64 = 60;
+const SLEEP: u64 = 1000 / 60;
+
+#[derive(Debug)]
+struct Packet {
+    tag: Movement,
+    frames: Vec<Frame>,
+    //blocks:PlayerBlock,
+    //checker: BlockChecker,
+}
+
+#[derive(Debug)]
+struct PlayerBlock {
+    block_body: Block,
+    block_head: Block,
+    block_hand: Block,
+    block_leg: Block,
+}
+
+type Frame = Vec<u32>;
+type Stream = Vec<Packet>;
+
+#[derive(Debug, Clone, Copy)]
+enum Speed {
+    Stop = 0,
+    Fast = 1,
+    Norminal = 3,
+    Slow = 6,
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,47 +53,96 @@ fn main() {
 
     let mut window = Window::new("rmg", width, height, windowoptions).unwrap();
 
-    window.limit_update_rate(Some(std::time::Duration::from_millis(
-        args[1].parse::<u64>().unwrap(),
-    )));
-
-    // ==========================================
-    // background
-    window.update();
+    window.limit_update_rate(Some(std::time::Duration::from_millis(SLEEP)));
 
     // ==========================================
     // p1
-    let mut p1 = Hero::new(Vec::new(), 30, true);
-    p1.load_frames();
+    let ase = AsepriteFile::read_file(Path::new("./tests/all.ase")).unwrap();
+    println!("Size: {}x{}", ase.width(), ase.height());
+    println!("Frames: {}", ase.num_frames());
+    println!("Layers: {}", ase.num_layers());
+    println!("Tags: {}", ase.num_tags());
+
+    let mut p1 = Player::new(true, ase);
+    p1.load_stream("stop"); // stop
+    p1.load_stream("walk"); // walk
+    p1.load_stream("run"); // run
     p1.x_offset = 0;
     p1.y_offset = 0;
 
+    dbg!(p1.stream.len());
+
+    // ==========================================
+    // init
+    window.update();
+    let mut frame_timer = p1.speed as u8;
     // ==========================================
     // display
     'l1: while window.is_open() {
+        dbg!(p1.maybe, p1.timer);
         match window.get_keys().as_slice() {
             &[Key::W] => {}
             &[Key::S] => {}
 
             &[Key::A] => {}
-            &[Key::D] => {
-                p1.move_right();
-            }
+            &[Key::D] => match p1.movement {
+                Movement::Stop => {
+                    p1.switch_to(Movement::Walk);
+                    p1.maybe = Some(true);
+                }
+
+                Movement::Walk => {
+                    if p1.timer > 10 && p1.timer < 30 && p1.maybe == Some(true) {
+                        p1.switch_to(Movement::Run);
+                        p1.maybe = Some(false);
+                    } else if p1.timer > 30 && p1.maybe == Some(true) {
+                        p1.maybe = Some(false);
+                        p1.timer = 0;
+                    } else if p1.maybe == Some(true) {
+                        p1.timer += 1;
+                    } else {
+                    }
+                }
+                _ => {
+                    p1.maybe = Some(false);
+                }
+            },
 
             &[Key::Q] => {
                 std::process::exit(0);
             }
-            _ => {}
+
+            _ => {
+                if p1.timer > 30 || p1.maybe.is_some() {
+                    p1.movement = Movement::Stop;
+                    p1.ptr_frame = 0;
+                    p1.maybe = None;
+                    p1.timer = 0;
+                } else {
+                }
+            }
         }
 
         // background
         let bg = &vec![0; 1000 * 1000];
 
-        // p1
-        let buffer = flush_buffer(&bg, p1.get_frame(), p1.x_offset, 0, width as u32, 864);
-        p1.next_frame();
+        // frame
+        if p1.frame_timer > 0 {
+            p1.frame_timer -= 1;
+        } else {
+            p1.next_frame();
+            p1.frame_timer = p1.speed as u8;
+        }
 
-        // p2
+        // p1
+        let buffer = flush_buffer(
+            &bg,
+            p1.get_frame(),
+            p1.x_offset,
+            0,
+            width as u32,
+            p1.ase.width() as u32,
+        );
 
         window.update_with_buffer(&buffer, width, height).unwrap();
     }
@@ -75,12 +156,14 @@ struct FramesInfo {
 }
 
 #[derive(Debug)]
-struct Hero {
+struct Player {
+    ase: AsepriteFile,
     // v_wait:FramesInfo,
     // v_run:FramesInfo,
-    frames: Vec<Vec<u32>>,
-    frame: u32,
-    frame_group: u32,
+    stream: Stream,
+    ptr_frame: usize,
+    ptr_packet: usize,
+
     hp: u32,
     ep: u32,
 
@@ -92,16 +175,29 @@ struct Hero {
     x_offset: u32,
     y_offset: u32,
     is_p1: bool,
-    state: HeroState,
+    movement: Movement,
+    status: Status,
+
+    speed: Speed,
+    frame_timer: u8,
+    timer: u8,
+
+    maybe: Option<bool>,
 }
 
-#[derive(Debug, Default)]
-enum HeroState {
-    #[default]
-    Wait,
+#[derive(Debug)]
+enum Status {
+    Null,
+}
 
-    Walk,
-    Run,
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
+enum Movement {
+    #[default]
+    Stop = 0,
+
+    Walk = 1,
+
+    Run = 2,
 }
 
 #[derive(Debug)]
@@ -121,14 +217,16 @@ struct Block {
     y2: u32,
 }
 
-impl Hero {
-    fn new(frames: Vec<Vec<u32>>, frame_group: u32, is_p1: bool) -> Self {
+impl Player {
+    fn new(is_p1: bool, ase: AsepriteFile) -> Self {
         Self {
-            frames,
-            frame: 0,
-            frame_group,
-            hp: 10000,
-            ep: 10000,
+            timer: 0,
+            ase,
+            ptr_frame: 0,
+            ptr_packet: 0,
+            stream: Vec::new(),
+            hp: 1000,
+            ep: 100,
             block_body: Block::new(0, 0, 100, 100),
             block_head: Block::new(10, 10, 10, 10),
             block_hand: Block::new(10, 10, 10, 10),
@@ -137,37 +235,77 @@ impl Hero {
             x_offset: 0,
             y_offset: 0,
             is_p1,
-            state: HeroState::default(),
+            movement: Movement::default(),
+            status: Status::Null,
+
+            maybe: None,
+
+            speed: Speed::Norminal,
+            frame_timer: Speed::Norminal as u8,
         }
     }
 
-    fn load_frames(&mut self) {
-        for nums in 1..=self.frame_group as usize {
-            let img = ImageReader::open(format!("./Athena/Wait/right{}.png", nums))
-                .unwrap()
-                .decode()
-                .unwrap();
-            let mut img = img.to_rgb8().to_vec();
-            let mut buffer = Vec::new();
+    fn load_stream(&mut self, id: &str) {
+        let mut packet = Packet {
+            tag: Movement::from(id),
+            frames: vec![],
+        };
 
-            for f in (0..img.len()).step_by(3) {
-                buffer.push(rgb_as_u32(&img[f..f + 3].try_into().unwrap()));
+        let tag = self.ase.tag_by_name(id).unwrap();
+        let start = tag.from_frame();
+        let end = tag.to_frame();
+        dbg!(start, end);
+
+        for idx in start..end {
+            let img = self.ase.frame(idx).layer(0).image();
+            let img = img.as_raw();
+
+            let mut frame = Vec::with_capacity(img.len() / 4);
+
+            for f in (0..img.len()).step_by(4) {
+                frame.push(argb_as_u32(&img[f..f + 4].try_into().unwrap()));
             }
 
-            self.frames.push(buffer);
+            packet.frames.push(frame);
         }
+
+        self.stream.push(packet);
     }
 
     fn get_frame(&self) -> &[u32] {
-        &self.frames[self.frame as usize]
+        let ptr = self.movement as usize;
+        dbg!(ptr, self.ptr_frame);
+
+        &self.stream[ptr].frames[self.ptr_frame]
     }
 
     fn next_frame(&mut self) {
-        if self.frame + 1 == self.frame_group {
-            self.frame = 0;
+        let ptr = self.movement as usize;
+        dbg!(ptr);
+
+        if self.ptr_frame + 1 < self.stream[ptr].frames.len() {
+            self.ptr_frame += 1;
         } else {
-            self.frame += 1;
+            self.ptr_frame = 0;
         }
+
+        match self.movement {
+            Movement::Stop => {}
+            Movement::Walk => {
+                self.move_walk();
+            }
+            Movement::Run => {
+                self.move_run();
+            }
+
+            _ => {}
+        }
+    }
+
+    fn switch_to(&mut self, movement: Movement) {
+        self.movement = movement;
+        self.timer = 0;
+        self.ptr_frame = 0;
     }
 
     fn try_move(&mut self, block_checker: &BlockChecker) {
@@ -179,11 +317,20 @@ impl Hero {
     }
 
     fn move_left(&mut self) {}
-    fn move_right(&mut self) {
+
+    fn move_run(&mut self) {
         if self.x_offset > 200 * 4 {
             self.x_offset = 0;
         } else {
-            self.x_offset += 4;
+            self.x_offset += 24;
+        }
+    }
+
+    fn move_walk(&mut self) {
+        if self.x_offset > 200 * 4 {
+            self.x_offset = 0;
+        } else {
+            self.x_offset += 6;
         }
     }
     fn move_up(&mut self) {}
@@ -282,10 +429,53 @@ impl Buffer {
 }
 
 #[inline(always)]
-pub fn rgb_as_u32(rgb: &[u8; 3]) -> u32 {
-    let r = (rgb[0] as u32) << 16;
-    let g = (rgb[1] as u32) << 8;
-    let b = (rgb[2] as u32) << 0;
+pub fn argb_as_u32(arr: &[u8; 4]) -> u32 {
+    let a = (arr[3] as u32) << 8 * 3;
 
-    r + g + b
+    let r = (arr[0] as u32) << 8 * 2;
+    let g = (arr[1] as u32) << 8 * 1;
+    let b = (arr[2] as u32) << 8 * 0;
+
+    a + r + g + b
+}
+
+impl From<&Speed> for u8 {
+    fn from(value: &Speed) -> Self {
+        match *value {
+            Speed::Stop => 0,
+            Speed::Fast => 1,
+            Speed::Norminal => 3,
+            Speed::Slow => 6,
+
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+}
+
+impl From<&str> for Movement {
+    fn from(value: &str) -> Self {
+        match value {
+            "stop" => Movement::Stop,
+            "walk" => Movement::Walk,
+            "run" => Movement::Run,
+            _ => {
+                todo!()
+            }
+        }
+    }
+}
+
+impl From<Movement> for usize {
+    fn from(value: Movement) -> Self {
+        match value {
+            Movement::Stop => 0,
+            Movement::Walk => 1,
+            Movement::Run => 2,
+            _ => {
+                todo!()
+            }
+        }
+    }
 }
