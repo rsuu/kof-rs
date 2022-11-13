@@ -1,6 +1,7 @@
 use asefile::AsepriteFile;
 use image;
 use image::io::Reader as ImageReader;
+use log::debug;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -12,9 +13,11 @@ const SLEEP: u64 = 1000 / 60;
 #[derive(Debug)]
 struct Packet {
     tag: Movement,
-    frames: Vec<Frame>,
+    right: Vec<Frame>,
+    left: Vec<Frame>,
+    width: u32,
     //blocks:PlayerBlock,
-    //checker: BlockChecker,
+    //checker: Dire,
 }
 
 #[derive(Debug)]
@@ -31,9 +34,11 @@ type Stream = Vec<Packet>;
 #[derive(Debug, Clone, Copy)]
 enum Speed {
     Stop = 0,
-    Fast = 1,
-    Norminal = 3,
-    Slow = 6,
+    VeryFast = 1,
+    Fast = 3,
+    Norminal = 6,
+    Slow = 12,
+    VerySlow = 24,
 }
 
 fn main() {
@@ -57,20 +62,12 @@ fn main() {
 
     // ==========================================
     // p1
-    let ase = AsepriteFile::read_file(Path::new("./tests/all.ase")).unwrap();
-    println!("Size: {}x{}", ase.width(), ase.height());
-    println!("Frames: {}", ase.num_frames());
-    println!("Layers: {}", ase.num_layers());
-    println!("Tags: {}", ase.num_tags());
-
-    let mut p1 = Player::new(true, ase);
-    p1.load_stream("stop"); // stop
-    p1.load_stream("walk"); // walk
-    p1.load_stream("run"); // run
+    let mut p1 = Player::new(Dire::Right);
+    p1.load_stream("stop");
+    p1.load_stream("walk");
+    p1.load_stream("run");
     p1.x_offset = 0;
     p1.y_offset = 0;
-
-    dbg!(p1.stream.len());
 
     // ==========================================
     // init
@@ -79,38 +76,64 @@ fn main() {
     // ==========================================
     // display
     'l1: while window.is_open() {
-        //dbg!(p1.is_dou, p1.timer);
         match window.get_keys().as_slice() {
             &[Key::W] => {}
             &[Key::S] => {}
 
-            &[Key::A] => {}
-            &[Key::D] => match p1.movement {
-                Movement::Stop => {
-                    p1.switch_to(Movement::Walk);
-                }
+            &[Key::A] => {
+                p1.dire = Dire::Left;
 
-                Movement::Walk => {
-                    p1.move_walk();
-
-                    if p1.is_dou {
-                        p1.switch_to(Movement::Run);
-                    } else {
+                match p1.movement {
+                    Movement::Stop => {
+                        p1.switch_to(Movement::Walk);
                     }
+
+                    Movement::Walk => {
+                        p1.move_walk();
+
+                        if p1.is_dou {
+                            p1.switch_to(Movement::Run);
+                        } else {
+                        }
+                    }
+                    Movement::Run => {
+                        p1.move_run();
+                        p1.is_dou = false;
+                    }
+                    _ => {}
                 }
-                Movement::Run => {
-                    p1.move_run();
-                    p1.is_dou = false;
+            }
+
+            &[Key::D] => {
+                p1.dire = Dire::Right;
+
+                match p1.movement {
+                    Movement::Stop => {
+                        p1.switch_to(Movement::Walk);
+                    }
+
+                    Movement::Walk => {
+                        p1.move_walk();
+
+                        if p1.is_dou {
+                            p1.switch_to(Movement::Run);
+                        } else {
+                        }
+                    }
+                    Movement::Run => {
+                        p1.move_run();
+                        p1.is_dou = false;
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
 
             &[Key::Q] => {
                 std::process::exit(0);
             }
 
             _ => {
-                if (p1.timer > 5 && p1.timer < 15) {
+                if (p1.timer > 3 && p1.timer < 15) {
                     p1.is_dou = true;
                 } else if p1.movement != Movement::Stop {
                     p1.switch_to(Movement::Stop);
@@ -143,7 +166,7 @@ fn main() {
             p1.x_offset,
             0,
             width as u32,
-            p1.ase.width() as u32,
+            p1.stream[p1.movement as usize].width,
         );
 
         window.update_with_buffer(&buffer, width, height).unwrap();
@@ -159,7 +182,6 @@ struct FramesInfo {
 
 #[derive(Debug)]
 struct Player {
-    ase: AsepriteFile,
     // v_wait:FramesInfo,
     // v_run:FramesInfo,
     stream: Stream,
@@ -176,7 +198,6 @@ struct Player {
 
     x_offset: u32,
     y_offset: u32,
-    is_p1: bool,
     movement: Movement,
     status: Status,
 
@@ -185,6 +206,8 @@ struct Player {
     timer: u32,
 
     is_dou: bool,
+
+    dire: Dire,
 }
 
 #[derive(Debug)]
@@ -202,13 +225,19 @@ enum Movement {
     Run = 2,
 }
 
-#[derive(Debug)]
-enum BlockChecker {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Dire {
     Up,
     Down,
     Left,
     Right,
     Unknown,
+}
+
+#[derive(Debug)]
+struct Offset {
+    x: u32,
+    y: u32,
 }
 
 #[derive(Debug)]
@@ -220,10 +249,9 @@ struct Block {
 }
 
 impl Player {
-    fn new(is_p1: bool, ase: AsepriteFile) -> Self {
+    fn new(dire: Dire) -> Self {
         Self {
             timer: 0,
-            ase,
             ptr_frame: 0,
             ptr_packet: 0,
             stream: Vec::new(),
@@ -236,7 +264,6 @@ impl Player {
 
             x_offset: 0,
             y_offset: 0,
-            is_p1,
             movement: Movement::default(),
             status: Status::Null,
 
@@ -244,22 +271,32 @@ impl Player {
 
             speed: Speed::Norminal,
             frame_timer: Speed::Norminal as u8,
+
+            dire,
         }
     }
 
     fn load_stream(&mut self, id: &str) {
+        let ase = AsepriteFile::read_file(Path::new(&format!("./tests/{}.ase", id))).unwrap();
+        log::debug!("Size: {}x{}", ase.width(), ase.height());
+        log::debug!("Frames: {}", ase.num_frames());
+        log::debug!("Layers: {}", ase.num_layers());
+        log::debug!("Tags: {}", ase.num_tags());
+
         let mut packet = Packet {
             tag: Movement::from(id),
-            frames: vec![],
+            right: vec![],
+            left: vec![],
+            width: ase.width() as u32,
         };
 
-        let tag = self.ase.tag_by_name(id).unwrap();
+        // TODO:
+        let tag = ase.tag_by_name("p1").unwrap();
         let start = tag.from_frame();
         let end = tag.to_frame();
-        dbg!(start, end);
 
         for idx in start..end {
-            let img = self.ase.frame(idx).layer(0).image();
+            let img = ase.frame(idx).layer(0).image();
             let img = img.as_raw();
 
             let mut frame = Vec::with_capacity(img.len() / 4);
@@ -268,7 +305,10 @@ impl Player {
                 frame.push(argb_as_u32(&img[f..f + 4].try_into().unwrap()));
             }
 
-            packet.frames.push(frame);
+            packet.right.push(frame.clone());
+
+            turn(&mut frame, ase.width(), ase.height());
+            packet.left.push(frame);
         }
 
         self.stream.push(packet);
@@ -276,16 +316,18 @@ impl Player {
 
     fn get_frame(&self) -> &[u32] {
         let ptr = self.movement as usize;
-        dbg!(ptr, self.ptr_frame);
 
-        &self.stream[ptr].frames[self.ptr_frame]
+        if self.dire == Dire::Left {
+            &self.stream[ptr].left[self.ptr_frame]
+        } else {
+            &self.stream[ptr].right[self.ptr_frame]
+        }
     }
 
     fn next_frame(&mut self) {
         let ptr = self.movement as usize;
-        dbg!(ptr);
 
-        if self.ptr_frame + 1 < self.stream[ptr].frames.len() {
+        if self.ptr_frame + 1 < self.stream[ptr].right.len() {
             self.ptr_frame += 1;
         } else {
             self.ptr_frame = 0;
@@ -297,7 +339,7 @@ impl Player {
         self.ptr_frame = 0;
     }
 
-    fn try_move(&mut self, block_checker: &BlockChecker) {
+    fn try_move(&mut self, block_checker: &Dire) {
         match block_checker {
             _ => {
                 // doing nothing
@@ -305,25 +347,41 @@ impl Player {
         }
     }
 
-    fn move_run(&mut self) {
-        // TODO:
-        if self.x_offset > 200 * 2 {
-            // background OR stop
-            //self.x_offset = 0;
-        } else {
-            // player
-            self.x_offset += 4 * 4;
+    fn move_walk(&mut self) {
+        if self.dire == Dire::Right {
+            // TODO:
+            if self.x_offset + 4 >= 200 * 2 {
+                // background OR stop
+                //self.x_offset = 0;
+            } else {
+                // player
+                self.x_offset += 4;
+            }
+        } else if self.dire == Dire::Left {
+            // TODO:
+            if self.x_offset >= 4 {
+                self.x_offset -= 4;
+            } else {
+            }
         }
     }
 
-    fn move_walk(&mut self) {
-        // TODO:
-        if self.x_offset > 200 * 2 {
-            // background OR stop
-            //self.x_offset = 0;
-        } else {
-            // player
-            self.x_offset += 4;
+    fn move_run(&mut self) {
+        if self.dire == Dire::Right {
+            // TODO:
+            if self.x_offset + 4 >= 200 * 2 {
+                // background OR stop
+                //self.x_offset = 0;
+            } else {
+                // player
+                self.x_offset += 4 * 4;
+            }
+        } else if self.dire == Dire::Left {
+            // TODO:
+            if self.x_offset >= 4 {
+                self.x_offset -= 4 * 4;
+            } else {
+            }
         }
     }
     fn move_up(&mut self) {}
@@ -349,7 +407,7 @@ impl Block {
         }
     }
 
-    fn check(&self, block2: &Block) -> BlockChecker {
+    fn check(&self, block2: &Block) -> Dire {
         // x1 --- x2    x1 --- x2    x1 --- x2
         // |       |    |       |    |       |
         // |       |    |       |    |       |
@@ -369,15 +427,15 @@ impl Block {
         // y1 --- y2    y1 --- y2    y1 --- y2
 
         if self.x2 <= block2.x1 {
-            BlockChecker::Right
+            Dire::Right
         } else if self.x1 <= block2.x2 {
-            BlockChecker::Left
+            Dire::Left
         } else if self.x1 <= block2.y1 {
-            BlockChecker::Up
+            Dire::Up
         } else if self.y1 >= block2.x1 {
-            BlockChecker::Down
+            Dire::Down
         } else {
-            BlockChecker::Unknown
+            Dire::Unknown
         }
     }
 }
@@ -436,9 +494,11 @@ impl From<&Speed> for u8 {
     fn from(value: &Speed) -> Self {
         match *value {
             Speed::Stop => 0,
-            Speed::Fast => 1,
-            Speed::Norminal => 3,
-            Speed::Slow => 6,
+            Speed::VeryFast => 1,
+            Speed::Fast => 3,
+            Speed::Norminal => 6,
+            Speed::Slow => 12,
+            Speed::VerySlow => 24,
 
             _ => {
                 unreachable!()
@@ -469,6 +529,26 @@ impl From<Movement> for usize {
             _ => {
                 todo!()
             }
+        }
+    }
+}
+
+fn turn(img: &mut Vec<u32>, iw: usize, ih: usize) {
+    let mut left: usize = 0;
+    let mut right: usize = 0;
+    let mut ptr = 0;
+
+    // TODO:
+
+    for y in 1..=ih {
+        right = iw * y - 1;
+        left = iw * y - iw;
+
+        for x in 0..iw / 2 {
+            img.swap(left, right);
+
+            left += 1;
+            right -= 1;
         }
     }
 }
