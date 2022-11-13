@@ -79,7 +79,7 @@ fn main() {
     // ==========================================
     // display
     'l1: while window.is_open() {
-        dbg!(p1.maybe, p1.timer);
+        //dbg!(p1.is_dou, p1.timer);
         match window.get_keys().as_slice() {
             &[Key::W] => {}
             &[Key::S] => {}
@@ -88,24 +88,21 @@ fn main() {
             &[Key::D] => match p1.movement {
                 Movement::Stop => {
                     p1.switch_to(Movement::Walk);
-                    p1.maybe = Some(true);
                 }
 
                 Movement::Walk => {
-                    if p1.timer > 10 && p1.timer < 30 && p1.maybe == Some(true) {
+                    p1.move_walk();
+
+                    if p1.is_dou {
                         p1.switch_to(Movement::Run);
-                        p1.maybe = Some(false);
-                    } else if p1.timer > 30 && p1.maybe == Some(true) {
-                        p1.maybe = Some(false);
-                        p1.timer = 0;
-                    } else if p1.maybe == Some(true) {
-                        p1.timer += 1;
                     } else {
                     }
                 }
-                _ => {
-                    p1.maybe = Some(false);
+                Movement::Run => {
+                    p1.move_run();
+                    p1.is_dou = false;
                 }
+                _ => {}
             },
 
             &[Key::Q] => {
@@ -113,15 +110,20 @@ fn main() {
             }
 
             _ => {
-                if p1.timer > 30 || p1.maybe.is_some() {
-                    p1.movement = Movement::Stop;
-                    p1.ptr_frame = 0;
-                    p1.maybe = None;
+                if (p1.timer > 5 && p1.timer < 15) {
+                    p1.is_dou = true;
+                } else if p1.movement != Movement::Stop {
+                    p1.switch_to(Movement::Stop);
                     p1.timer = 0;
+                    p1.is_dou = false;
                 } else {
+                    p1.timer = 0;
+                    p1.is_dou = false;
                 }
             }
         }
+
+        p1.timer += 1;
 
         // background
         let bg = &vec![0; 1000 * 1000];
@@ -180,9 +182,9 @@ struct Player {
 
     speed: Speed,
     frame_timer: u8,
-    timer: u8,
+    timer: u32,
 
-    maybe: Option<bool>,
+    is_dou: bool,
 }
 
 #[derive(Debug)]
@@ -238,7 +240,7 @@ impl Player {
             movement: Movement::default(),
             status: Status::Null,
 
-            maybe: None,
+            is_dou: false,
 
             speed: Speed::Norminal,
             frame_timer: Speed::Norminal as u8,
@@ -288,23 +290,10 @@ impl Player {
         } else {
             self.ptr_frame = 0;
         }
-
-        match self.movement {
-            Movement::Stop => {}
-            Movement::Walk => {
-                self.move_walk();
-            }
-            Movement::Run => {
-                self.move_run();
-            }
-
-            _ => {}
-        }
     }
 
     fn switch_to(&mut self, movement: Movement) {
         self.movement = movement;
-        self.timer = 0;
         self.ptr_frame = 0;
     }
 
@@ -316,21 +305,25 @@ impl Player {
         }
     }
 
-    fn move_left(&mut self) {}
-
     fn move_run(&mut self) {
-        if self.x_offset > 200 * 4 {
-            self.x_offset = 0;
+        // TODO:
+        if self.x_offset > 200 * 2 {
+            // background OR stop
+            //self.x_offset = 0;
         } else {
-            self.x_offset += 24;
+            // player
+            self.x_offset += 4 * 4;
         }
     }
 
     fn move_walk(&mut self) {
-        if self.x_offset > 200 * 4 {
-            self.x_offset = 0;
+        // TODO:
+        if self.x_offset > 200 * 2 {
+            // background OR stop
+            //self.x_offset = 0;
         } else {
-            self.x_offset += 6;
+            // player
+            self.x_offset += 4;
         }
     }
     fn move_up(&mut self) {}
