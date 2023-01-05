@@ -19,8 +19,6 @@ fn main() {
 
     let mut window = Window::new("rmg", width, height, windowoptions).unwrap();
 
-    window.limit_update_rate(Some(std::time::Duration::from_millis(FPS as u64)));
-
     // ==========================================
     // p1
     let mut p1 = Player::new(Dire::Right, true);
@@ -57,6 +55,8 @@ fn main() {
         p2.flush_buffer(&mut buffer, 0, width as u32);
 
         window.update_with_buffer(&buffer, width, height).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(FPS as u64));
     }
     // ==========================================
 }

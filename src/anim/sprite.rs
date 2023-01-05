@@ -7,6 +7,7 @@
 //  hp
 
 use asefile::AsepriteFile;
+use log::debug;
 use minifb::{Key, Window};
 use std::mem;
 use std::path::Path;
@@ -69,8 +70,6 @@ pub struct Player {
     pub speed: Speed,
     pub frame_timer: u8,
     pub timer: u32,
-
-    pub is_dou: bool,
 
     pub dire: Dire,
 
@@ -175,7 +174,6 @@ impl Player {
             speed: Speed::Norminal,
             frame_timer: Speed::Norminal as u8,
             dire,
-            is_dou: false,
             is_p1,
             key_list: vec![KeyCount::null()],
         }
@@ -306,10 +304,10 @@ impl Player {
     pub fn move_up(&mut self) {}
     pub fn move_down(&mut self) {}
 
+    // reset timer
     #[inline]
     pub fn timeout(&self) -> bool {
-        // reset timer
-        if self.timer >= 1 && self.timer >= 1000 / 30 {
+        if self.timer >= 1 && self.timer >= 1000 / 60 {
             true
         } else {
             false
@@ -322,8 +320,7 @@ impl Player {
             let last = self.key_list.last_mut().unwrap();
 
             if last.key == *key && last.count <= 200 {
-                if self.movement == Movement::Walk && self.is_dou == false {
-                    self.is_dou = true;
+                if self.movement == Movement::Walk {
                     last.count = 1;
                 } else {
                     last.count += 1;
@@ -336,10 +333,27 @@ impl Player {
 
     #[inline(always)]
     pub fn check_keys_p1(&mut self, window: &Window) {
-        // dbg!(&self.movement);
+        debug!("{:?}", &self.movement);
+        debug!("{:?}", self.key_list.as_slice());
 
         // TODO:
         match (self.movement, self.key_list.len(), self.key_list.as_slice()) {
+            // A + D + A + D + J
+            // BUG:
+            (_, len, keys) if (len >= 6) => {
+                if keys[1].matched(&KeyCount::new(Key::A, 0, 0))
+                    && keys[2].matched(&KeyCount::new(Key::D, 0, 0))
+                    && keys[3].matched(&KeyCount::new(Key::A, 0, 0))
+                    && keys[4].matched(&KeyCount::new(Key::D, 0, 0))
+                    && keys[5].matched(&KeyCount::new(Key::J, 0, 0))
+                {
+                    dbg!(self.movement);
+
+                    dbg!("A D A D J");
+                } else {
+                }
+            }
+
             // stop -> Walk -> run
             (Movement::Walk, len, keys) if (len >= 4) => {
                 if keys[1].matched(&KeyCount::new(Key::A, 0, 0))
@@ -420,6 +434,7 @@ impl Player {
     pub fn check_keys(&mut self, window: &Window) {
         let keys = window.get_keys();
         let mut tmp: Vec<Key> = vec![];
+        let mut need_reset = false;
 
         if self.is_p1 {
             for key in keys.iter() {
@@ -434,6 +449,22 @@ impl Player {
 
             self.keys_for(tmp.as_slice(), window);
             self.check_keys_p1(window);
+
+            // true:
+            //   Walk + A + A
+            //   Walk + D + D
+            // false:
+            //   Walk + A + D
+            //   Walk + D + A
+            if (self.movement == Movement::Walk || self.movement == Movement::Run) {
+                if window.is_key_down(Key::A) && self.dire == Dire::Left {
+                } else if window.is_key_down(Key::D) && self.dire == Dire::Right {
+                } else {
+                    need_reset = true;
+                }
+            } else {
+                need_reset = true;
+            }
         } else {
             for key in keys.iter() {
                 match *key as u32 {
@@ -455,6 +486,16 @@ impl Player {
 
             self.keys_for(tmp.as_slice(), window);
             self.check_keys_p2(window);
+
+            if (self.movement == Movement::Walk || self.movement == Movement::Run) {
+                if window.is_key_down(Key::Left) && self.dire == Dire::Left {
+                } else if window.is_key_down(Key::Right) && self.dire == Dire::Right {
+                } else {
+                    need_reset = true;
+                }
+            } else {
+                need_reset = true;
+            }
         }
 
         // e.g.
@@ -475,36 +516,12 @@ impl Player {
         }
 
         self.check_keys_misc(&keys);
-
         self.move_to();
 
-        let mut need = false;
-
-        // true:
-        //   Walk + A + A
-        //   Walk + D + D
-        // false:
-        //   Walk + A + D
-        //   Walk + D + A
-        if (self.movement == Movement::Walk || self.movement == Movement::Run) {
-            if (window.is_key_down(Key::A) || window.is_key_down(Key::Left))
-                && self.dire == Dire::Left
-            {
-            } else if (window.is_key_down(Key::D) || window.is_key_down(Key::Right))
-                && self.dire == Dire::Right
-            {
-            } else {
-                need = true;
-            }
-        } else {
-            need = true;
-        }
-
-        if self.timeout() && need {
+        if self.timeout() && need_reset {
             self.timer = 1;
             self.key_list = vec![KeyCount::null()];
             self.switch_to(Movement::Stop);
-            self.is_dou = false;
         } else {
         }
 
@@ -725,5 +742,11 @@ pub fn argb_u32(buffer: &mut Vec<u32>, bytes: &[u8]) {
     }
 }
 
+enum KeyVer {}
+
 // TODO:
-trait KeyTrans {}
+trait KeyTrans {
+    fn from_p1() {}
+
+    fn from_p2() {}
+}
