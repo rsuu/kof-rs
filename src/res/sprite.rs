@@ -6,8 +6,8 @@
 //  cd
 //  hp
 
-use asefile::AsepriteFile;
-use log::debug;
+use asefile;
+use log;
 use minifb::{Key, Window};
 use std::mem;
 use std::path::Path;
@@ -85,7 +85,7 @@ pub struct Offset {
 
 #[derive(Debug, Clone, Copy)]
 pub struct KeyCount {
-    key: Key,
+    key: KeyMap,
     count: u8,
     timeout: u8,
 }
@@ -135,7 +135,7 @@ pub enum Dire {
 
 ////////////////////////////////////////
 impl KeyCount {
-    pub fn new(key: Key, count: u8, timeout: u8) -> Self {
+    pub fn new(key: KeyMap, count: u8, timeout: u8) -> Self {
         Self {
             key,
             count,
@@ -144,7 +144,7 @@ impl KeyCount {
     }
 
     pub fn null() -> Self {
-        Self::new(Key::Unknown, 0, 0)
+        Self::new(KeyMap::Unknown, 0, 0)
     }
 
     pub fn matched(&self, map: &KeyCount) -> bool {
@@ -158,7 +158,7 @@ impl Player {
             timer: 0,
             ptr_frame: 0,
             ptr_packet: 0,
-            stream: Vec::new(),
+            stream: vec![],
             hp: 1000,
             ep: 100,
             block_body: Block::new(0, 0, 100, 100),
@@ -180,7 +180,8 @@ impl Player {
     }
 
     pub fn load_stream(&mut self, id: &str) {
-        let ase = AsepriteFile::read_file(Path::new(&format!("./tests/{}.ase", id))).unwrap();
+        let ase =
+            asefile::AsepriteFile::read_file(Path::new(&format!("./tests/{}.ase", id))).unwrap();
         log::debug!("Size: {}x{}", ase.width(), ase.height());
         log::debug!("Frames: {}", ase.num_frames());
         log::debug!("Layers: {}", ase.num_layers());
@@ -305,9 +306,9 @@ impl Player {
     pub fn move_down(&mut self) {}
 
     // reset timer
-    #[inline]
+    #[inline(always)]
     pub fn timeout(&self) -> bool {
-        if self.timer >= 1 && self.timer >= 1000 / 60 {
+        if self.timer >= 24 {
             true
         } else {
             false
@@ -315,14 +316,14 @@ impl Player {
     }
 
     #[inline(always)]
-    pub fn keys_for(&mut self, keys: &[Key], window: &Window) {
+    pub fn keys_from(&mut self, keys: &[KeyMap]) {
         for key in keys.iter() {
             let last = self.key_list.last_mut().unwrap();
 
-            if last.key == *key && last.count <= 200 {
+            if last.key == *key {
                 if self.movement == Movement::Walk {
-                    last.count = 1;
-                } else {
+                    last.count = u8::MIN;
+                } else if last.count < u8::MAX {
                     last.count += 1;
                 }
             } else {
@@ -331,201 +332,174 @@ impl Player {
         }
     }
 
+    // FIXME:
     #[inline(always)]
-    pub fn check_keys_p1(&mut self, window: &Window) {
-        debug!("{:?}", &self.movement);
-        debug!("{:?}", self.key_list.as_slice());
-
-        // TODO:
-        match (self.movement, self.key_list.len(), self.key_list.as_slice()) {
-            // A + D + A + D + J
-            // BUG:
-            (_, len, keys) if (len >= 6) => {
-                if keys[1].matched(&KeyCount::new(Key::A, 0, 0))
-                    && keys[2].matched(&KeyCount::new(Key::D, 0, 0))
-                    && keys[3].matched(&KeyCount::new(Key::A, 0, 0))
-                    && keys[4].matched(&KeyCount::new(Key::D, 0, 0))
-                    && keys[5].matched(&KeyCount::new(Key::J, 0, 0))
-                {
-                    dbg!(self.movement);
-
-                    dbg!("A D A D J");
-                } else {
-                }
-            }
-
-            // stop -> Walk -> run
-            (Movement::Walk, len, keys) if (len >= 4) => {
-                if keys[1].matched(&KeyCount::new(Key::A, 0, 0))
-                    && keys[2].matched(&KeyCount::new(Key::Unknown, 0, 0))
-                    && keys[3].matched(&KeyCount::new(Key::A, 0, 0))
-                {
-                    self.dire = Dire::Left;
-                    self.switch_to(Movement::Run);
-                } else if keys[1].matched(&KeyCount::new(Key::D, 0, 0))
-                    && keys[2].matched(&KeyCount::new(Key::Unknown, 0, 0))
-                    && keys[3].matched(&KeyCount::new(Key::D, 0, 0))
-                {
-                    self.dire = Dire::Right;
-                    self.switch_to(Movement::Run);
-                }
-            }
-
-            // stop -> walk
-            (Movement::Stop, len, keys) if (len >= 2) => {
-                if keys[0].matched(&KeyCount::new(Key::Unknown, 0, 0)) {
-                    if keys[1].matched(&KeyCount::new(Key::A, 0, 0)) {
-                        self.dire = Dire::Left;
-                        self.switch_to(Movement::Walk);
-                    } else if keys[1].matched(&KeyCount::new(Key::D, 0, 0)) {
-                        self.dire = Dire::Right;
-                        self.switch_to(Movement::Walk);
-                    } else {
+    fn filter(&self, res: &mut Vec<KeyMap>, keys: &[Key]) {
+        if self.is_p1 {
+            for key in keys.iter() {
+                match *key as u32 {
+                    10..=35 => {
+                        res.push(KeyMap::from(key));
                     }
-                } else {
+
+                    _ => {}
                 }
             }
-
-            _ => {}
-        }
-    }
-
-    #[inline(always)]
-    pub fn check_keys_p2(&mut self, window: &Window) {
-        // TODO:
-        match (self.movement, self.key_list.len(), self.key_list.as_slice()) {
-            // stop -> Walk -> run
-            (Movement::Walk, len, keys) if (len >= 4) => {
-                if keys[1].matched(&KeyCount::new(Key::Left, 0, 0))
-                    && keys[2].matched(&KeyCount::new(Key::Unknown, 0, 0))
-                    && keys[3].matched(&KeyCount::new(Key::Left, 0, 0))
-                {
-                    self.dire = Dire::Left;
-                    self.switch_to(Movement::Run);
-                } else if keys[1].matched(&KeyCount::new(Key::Right, 0, 0))
-                    && keys[2].matched(&KeyCount::new(Key::Unknown, 0, 0))
-                    && keys[3].matched(&KeyCount::new(Key::Right, 0, 0))
-                {
-                    self.dire = Dire::Right;
-                    self.switch_to(Movement::Run);
-                }
-            }
-
-            // stop -> walk
-            (Movement::Stop, len, keys) if (len >= 2) => {
-                if keys[0].matched(&KeyCount::new(Key::Unknown, 0, 0)) {
-                    if keys[1].matched(&KeyCount::new(Key::Left, 0, 0)) {
-                        self.dire = Dire::Left;
-                        self.switch_to(Movement::Walk);
-                    } else if keys[1].matched(&KeyCount::new(Key::Right, 0, 0)) {
-                        self.dire = Dire::Right;
-                        self.switch_to(Movement::Walk);
-                    } else {
+        } else {
+            for key in keys.iter() {
+                match *key as u32 {
+                    0..=9|
+                    // UP, Down, Left, Right
+                    51..=54 => {
+                    res.push(KeyMap::from(key));
                     }
-                } else {
+
+                    _ => {}
                 }
             }
-
-            _ => {}
         }
     }
 
     #[inline(always)]
     pub fn check_keys(&mut self, window: &Window) {
         let keys = window.get_keys();
-        let mut tmp: Vec<Key> = vec![];
+        let mut tmp: Vec<KeyMap> = Vec::with_capacity(keys.len());
         let mut need_reset = false;
 
-        if self.is_p1 {
-            for key in keys.iter() {
-                match *key as u32 {
-                    10..=35 => {
-                        tmp.push(*key);
-                    }
+        self.check_keys_misc(&keys);
+        self.filter(&mut tmp, &keys);
+        self.keys_from(&tmp);
 
-                    _ => {}
-                }
-            }
+        self.inner_check_keys(window);
 
-            self.keys_for(tmp.as_slice(), window);
-            self.check_keys_p1(window);
+        let last = self.key_list.last().unwrap();
 
-            // true:
-            //   Walk + A + A
-            //   Walk + D + D
-            // false:
-            //   Walk + A + D
-            //   Walk + D + A
+        // true:
+        //   Walk + A + A
+        //   Walk + D + D
+        // false:
+        //   Walk + A + D
+        //   Walk + D + A
+        need_reset = {
             if (self.movement == Movement::Walk || self.movement == Movement::Run) {
-                if window.is_key_down(Key::A) && self.dire == Dire::Left {
-                } else if window.is_key_down(Key::D) && self.dire == Dire::Right {
-                } else {
-                    need_reset = true;
+                match (last.key, self.dire) {
+                    (KeyMap::Left, Dire::Left) => false,
+                    (KeyMap::Right, Dire::Right) => false,
+                    _ => true,
                 }
             } else {
-                need_reset = true;
+                true
             }
-        } else {
-            for key in keys.iter() {
-                match *key as u32 {
-                    0..=9 => {
-                        tmp.push(*key);
-                    }
+        };
 
-                    _ if (*key == Key::Up
-                        || *key == Key::Down
-                        || *key == Key::Left
-                        || *key == Key::Right) =>
-                    {
-                        tmp.push(*key);
-                    }
-
-                    _ => {}
-                }
-            }
-
-            self.keys_for(tmp.as_slice(), window);
-            self.check_keys_p2(window);
-
-            if (self.movement == Movement::Walk || self.movement == Movement::Run) {
-                if window.is_key_down(Key::Left) && self.dire == Dire::Left {
-                } else if window.is_key_down(Key::Right) && self.dire == Dire::Right {
-                } else {
-                    need_reset = true;
-                }
-            } else {
-                need_reset = true;
-            }
-        }
-
+        // if ( last == new )
         // e.g.
         //     Walk + D + (miss) + D = Run
         //     Walk + D + D = Walk
-        if window.is_key_down(self.key_list.last().unwrap().key) {
-        } else {
-            let last = self.key_list.last_mut().unwrap();
-            if last.key == Key::Unknown && last.count <= 200 {
-                last.count += 1;
-            } else {
-                self.key_list.push(KeyCount::null());
+        let is_double = {
+            match (self.is_p1, self.dire) {
+                (true, Dire::Left) => window.is_key_down(minifb::Key::A),
+                (true, Dire::Right) => window.is_key_down(minifb::Key::D),
+                (false, Dire::Left) => window.is_key_down(minifb::Key::Left),
+                (false, Dire::Right) => window.is_key_down(minifb::Key::Right),
+
+                _ => false,
             }
+        };
+
+        let last = self.key_list.last_mut().unwrap();
+
+        if is_double {
+        } else if last.key == KeyMap::Unknown && last.count < u8::MAX {
+            last.count += 1;
+        } else {
+            self.key_list.push(KeyCount::null());
         }
 
-        if self.key_list.len() > 2 {
-            //dbg!(self.key_list.as_slice());
-        }
-
-        self.check_keys_misc(&keys);
         self.move_to();
 
         if self.timeout() && need_reset {
-            self.timer = 1;
+            self.timer = 0;
             self.key_list = vec![KeyCount::null()];
             self.switch_to(Movement::Stop);
-        } else {
         }
 
         self.timer += 1;
+    }
+
+    #[inline(always)]
+    fn inner_check_keys(&mut self, window: &Window) {
+        log::debug!("{:?}", &self.movement);
+        log::debug!("{:?}", self.key_list.as_slice());
+
+        // TODO:
+        match (self.movement, self.key_list.len(), self.key_list.as_slice()) {
+            // A+D+A+D+J
+            // BUG:
+            (_, len, keys) if (len >= 6) => {
+                if keys[1].matched(&KeyCount::new(KeyMap::Left, 0, 0))
+                    && keys[2].matched(&KeyCount::new(KeyMap::Right, 0, 0))
+                    && keys[3].matched(&KeyCount::new(KeyMap::Left, 0, 0))
+                    && keys[4].matched(&KeyCount::new(KeyMap::Right, 0, 0))
+                    && keys[5].matched(&KeyCount::new(KeyMap::Att, 0, 0))
+                {
+                    dbg!(self.movement);
+
+                    dbg!("A D A D J");
+                } else {
+                    return;
+                }
+            }
+
+            // stop -> Walk -> run
+            (Movement::Walk, len, keys) if (len >= 4) => {
+                if keys[1].matched(&KeyCount::new(KeyMap::Left, 0, 0))
+                    && keys[2].matched(&KeyCount::new(KeyMap::Unknown, 0, 0))
+                    && keys[3].matched(&KeyCount::new(KeyMap::Left, 0, 0))
+                {
+                    self.dire = Dire::Left;
+                    self.switch_to(Movement::Run);
+                } else if keys[1].matched(&KeyCount::new(KeyMap::Right, 0, 0))
+                    && keys[2].matched(&KeyCount::new(KeyMap::Unknown, 0, 0))
+                    && keys[3].matched(&KeyCount::new(KeyMap::Right, 0, 0))
+                {
+                    self.dire = Dire::Right;
+                    self.switch_to(Movement::Run);
+                }
+            }
+
+            // stop -> walk
+            (Movement::Stop, len, keys) if (len >= 2) => {
+                if keys[0].matched(&KeyCount::new(KeyMap::Unknown, 0, 0)) {
+                } else {
+                    return;
+                }
+
+                if keys[1].matched(&KeyCount::new(KeyMap::Left, 0, 0)) {
+                    self.dire = Dire::Left;
+                    self.switch_to(Movement::Walk);
+                } else if keys[1].matched(&KeyCount::new(KeyMap::Right, 0, 0)) {
+                    self.dire = Dire::Right;
+                    self.switch_to(Movement::Walk);
+                } else {
+                    return;
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    #[inline(always)]
+    fn check_keys_misc(&mut self, keys: &[Key]) {
+        match *keys {
+            // exit
+            [Key::Q] => {
+                std::process::exit(0);
+            }
+
+            _ => {}
+        }
     }
 
     #[inline(always)]
@@ -541,18 +515,6 @@ impl Player {
 
             Movement::Run => {
                 self.move_run();
-            }
-
-            _ => {}
-        }
-    }
-
-    #[inline(always)]
-    pub fn check_keys_misc(&mut self, keys: &[Key]) {
-        match *keys {
-            // exit
-            [Key::Q] => {
-                std::process::exit(0);
             }
 
             _ => {}
@@ -742,11 +704,75 @@ pub fn argb_u32(buffer: &mut Vec<u32>, bytes: &[u8]) {
     }
 }
 
-enum KeyVer {}
-
 // TODO:
-trait KeyTrans {
-    fn from_p1() {}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyMap {
+    Quit = -1,
+    Unknown = 0,
 
-    fn from_p2() {}
+    Left = 1,
+    Right = 2,
+
+    Up = 3,
+    Down = 4,
+
+    Att = 11,
+}
+
+impl KeyMap {
+    pub fn from_key_list(list: &[minifb::Key]) -> Vec<Self> {
+        let mut res = Vec::with_capacity(list.len());
+
+        for key in list.iter() {
+            res.push(Self::from(key));
+        }
+
+        res
+    }
+}
+
+impl From<&minifb::Key> for KeyMap {
+    fn from(value: &minifb::Key) -> Self {
+        use minifb::Key;
+
+        match *value {
+            // p1
+            Key::W => Self::Up,
+            Key::S => Self::Down,
+            Key::A => Self::Left,
+            Key::D => Self::Right,
+            Key::J => Self::Att,
+            // p2
+            Key::Up => Self::Up,
+            Key::Down => Self::Down,
+            Key::Left => Self::Left,
+            Key::Right => Self::Right,
+            Key::NumPad1 => Self::Att,
+
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl Into<minifb::Key> for &KeyMap {
+    fn into(self) -> minifb::Key {
+        use minifb::Key;
+
+        match self {
+            // p1
+            KeyMap::Up => Key::W,
+            KeyMap::Down => Key::S,
+            KeyMap::Left => Key::A,
+            KeyMap::Right => Key::D,
+            KeyMap::Att => Key::J,
+            // p2
+            KeyMap::Up => Key::Up,
+            KeyMap::Down => Key::Down,
+            KeyMap::Left => Key::Left,
+            KeyMap::Right => Key::Right,
+            KeyMap::Att => Key::NumPad1,
+
+            _ => Key::Unknown,
+        }
+    }
 }

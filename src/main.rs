@@ -1,23 +1,25 @@
-use kuma::{anim::sprite::*, FPS};
-
+use kuma::{
+    res::sprite::{Dire, Player},
+    FPS,
+};
 use minifb::Window;
+use std::thread::sleep_ms;
 
 fn main() {
-    let _args: Vec<String> = std::env::args().collect();
     let (width, height) = (1000_usize, 1000_usize);
 
     let windowoptions = minifb::WindowOptions {
         borderless: false,
         transparency: false,
-        title: true,
         resize: false,
         topmost: false,
+        title: true,
         none: true,
         scale_mode: minifb::ScaleMode::Center,
         scale: minifb::Scale::X1,
     };
 
-    let mut window = Window::new("rmg", width, height, windowoptions).unwrap();
+    let mut window = Window::new("kuma", width, height, windowoptions).unwrap();
 
     // ==========================================
     // p1
@@ -56,7 +58,15 @@ fn main() {
 
         window.update_with_buffer(&buffer, width, height).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(FPS as u64));
+        sleep_ms(FPS);
     }
     // ==========================================
+}
+
+#[derive(Debug)]
+struct Rect {}
+
+#[derive(Debug)]
+struct Buffer {
+    timer: u32,
 }
